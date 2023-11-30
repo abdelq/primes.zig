@@ -1,7 +1,8 @@
 const std = @import("std");
+const math = std.math;
 const BitSet = std.bit_set.StaticBitSet;
 
-// Size found using `getconf LEVEL1_DCACHE_SIZE`
+// TODO Compute at compile time using `sysconf(_SC_LEVEL1_DCACHE_SIZE)`
 const L1D_CACHE_SIZE = 32 * 1024; // Bytes
 
 /// Sieve of Eratosthenes
@@ -28,17 +29,20 @@ pub fn reg_sieve(comptime limit: usize) BitSet(limit + 1) {
 }
 
 /// Segmented sieve of Eratosthenes
-pub fn seg_sieve(comptime limit: usize) void {
+///
+/// wikipedia.org/wiki/Sieve_of_Eratosthenes#Segmented_sieve
+pub fn seg_sieve(comptime limit: usize, prime_out: *?usize) void {
     // Size of each segment with consideration for cache efficiency
-    const size: usize = @min(comptime std.math.sqrt(limit), L1D_CACHE_SIZE * 8);
+    const size: usize = @min(comptime math.sqrt(limit), L1D_CACHE_SIZE * 8);
 
     // Sieve primes in the first segment `[0, size]`
     const primes = reg_sieve(size);
-
-    var reg_iter = primes.iterator(.{});
-    while (reg_iter.next()) |prime| {
-        next_prime = prime;
-        suspend {}
+    {
+        var iter = primes.iterator(.{});
+        while (iter.next()) |prime| {
+            prime_out.* = prime;
+            suspend {}
+        }
     }
 
     // Sieve primes in the following segments
@@ -62,19 +66,19 @@ pub fn seg_sieve(comptime limit: usize) void {
 
         var seg_iter = seg_primes.iterator(.{});
         while (seg_iter.next()) |i| {
-            next_prime = lo + i;
+            prime_out.* = lo + i;
             suspend {}
         }
     }
 
-    next_prime = null;
+    prime_out.* = null;
 }
 
-var next_prime: ?usize = undefined;
 pub fn main() void {
     const sieve_limit = 10e6;
 
-    var sieve = async seg_sieve(sieve_limit);
+    var next_prime: ?usize = undefined;
+    var sieve = async seg_sieve(sieve_limit, &next_prime);
     while (next_prime) |prime| {
         std.debug.print("{d}\n", .{prime});
         resume sieve;
@@ -83,10 +87,12 @@ pub fn main() void {
 
 test "Segmented sieve of Eratosthenes" {
     const sieve_limit = 10e6;
-    const primes = reg_sieve(sieve_limit);
 
     var prime_count: usize = 0;
-    var sieve = async seg_sieve(sieve_limit);
+    const primes = reg_sieve(sieve_limit);
+
+    var next_prime: ?usize = undefined;
+    var sieve = async seg_sieve(sieve_limit, &next_prime);
     while (next_prime) |prime| {
         prime_count += @boolToInt(primes.isSet(prime));
         resume sieve;
