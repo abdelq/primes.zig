@@ -1,16 +1,28 @@
-const mul = @import("std").math.mul;
+const std = @import("std");
+const mul = std.math.mul;
+const Int = std.meta.Int;
 
-pub fn mulmod(a: usize, b: usize, m: usize) !usize {
-    const modulus = m;
-    if (modulus == 0) {
-        return error.DivisionByZero;
+/// Modular multiplication
+pub fn mulmod(comptime T: type, a: T, b: T, m: T) !T {
+    @setRuntimeSafety(false);
+    if (T == comptime_int) {
+        return @mod(a * b, m);
     }
 
+    const modulus = m;
+    if (modulus == 0) return error.DivisionByZero;
+    if (modulus < 0) return error.NegativeModulus;
+
     // On overflow, falling back on the multiplication property first
-    return if (mul(usize, a, b) catch mul(usize, a % m, b % m)) |product|
-        product % modulus
-    else |_|
-        @intCast(usize, @as(u128, a) * @as(u128, b) % @as(u128, m));
+    return if (mul(T, a, b) catch mul(T, @mod(a, m), @mod(b, m))) |product|
+        @mod(product, modulus)
+    else |_| switch (@typeInfo(T)) {
+        .Int => |info| {
+            const WideInt = Int(info.signedness, info.bits * 2);
+            return @intCast(T, @mod(@as(WideInt, a) * @as(WideInt, b), @as(WideInt, m)));
+        },
+        else => @compileError("mulmod not implemented for " ++ @typeName(T)),
+    };
 }
 
 /// Modular exponentiation using the binary method
@@ -20,7 +32,7 @@ pub fn powmod(base: usize, exponent: usize, modulus: usize) !usize {
     // zig fmt: off
     if (modulus  == 0) return error.DivisionByZero;
     if (modulus  == 1) return 0;
-    if (exponent == 2) return mulmod(base, base, modulus);
+    if (exponent == 2) return mulmod(usize, base, base, modulus);
     // zig fmt: on
 
     var result: usize = 1;
@@ -31,9 +43,9 @@ pub fn powmod(base: usize, exponent: usize, modulus: usize) !usize {
     const m = modulus;
     while (e != 0) : (e >>= 1) {
         if (e & 1 == 1) {
-            result = mulmod(result, b, m) catch unreachable;
+            result = mulmod(usize, result, b, m) catch unreachable;
         }
-        b = mulmod(b, b, m) catch unreachable;
+        b = mulmod(usize, b, b, m) catch unreachable;
     }
 
     return result;
