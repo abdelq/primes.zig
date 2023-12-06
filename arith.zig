@@ -1,11 +1,11 @@
 const std = @import("std");
-const mul = std.math.mul;
+const math = std.math;
 const Int = std.meta.Int;
 const Tuple = std.meta.Tuple;
 
 /// Modular multiplicative inverse
 ///
-/// Based on the extended Euclidean algorithm
+/// Knuth, D. E. (1997), The Art of Computer Programming, Volume 2: Seminumerical Algorithms.
 pub fn invmod(number: isize, modulus: usize) !usize {
     if (modulus == 0) return error.DivisionByZero;
     if (modulus == 1) return error.NotInvertible;
@@ -37,9 +37,9 @@ pub fn invmod(number: isize, modulus: usize) !usize {
 
 /// Modular multiplication
 pub fn mulmod(comptime T: type, a: T, b: T, m: T) !T {
-    @setRuntimeSafety(false);
-    if (T == comptime_int) {
-        return @mod(a * b, m);
+    if (T == comptime_int) return @mod(a * b, m);
+    if (@typeInfo(T) != .Int) {
+        @compileError("mulmod not implemented for " ++ @typeName(T));
     }
 
     const modulus = m;
@@ -47,28 +47,33 @@ pub fn mulmod(comptime T: type, a: T, b: T, m: T) !T {
     if (modulus < 0) return error.NegativeModulus;
 
     // On overflow, falling back on the multiplication property first
-    return if (mul(T, a, b) catch mul(T, @mod(a, m), @mod(b, m))) |product|
-        @mod(product, modulus)
-    else |_| switch (@typeInfo(T)) {
-        .Int => |info| {
-            const WideInt = Int(info.signedness, info.bits * 2);
-            return @intCast(T, @mod(@as(WideInt, a) * @as(WideInt, b), @as(WideInt, m)));
-        },
-        else => @compileError("mulmod not implemented for " ++ @typeName(T)),
-    };
+    if (math.mul(T, a, b) catch math.mul(T, @mod(a, m), @mod(b, m))) |product| {
+        return @mod(product, modulus);
+    } else |_| {
+        const WideInt = Int(@typeInfo(T).Int.signedness, @typeInfo(T).Int.bits * 2);
+        return @intCast(T, @mod(@as(WideInt, a) * @as(WideInt, b), @as(WideInt, m)));
+    }
 }
 
-/// Modular exponentiation using the binary method
+/// Modular exponentiation
 ///
-/// wikipedia.org/wiki/Modular_exponentiation
-pub fn powmod(base: usize, exponent: usize, modulus: usize) !usize {
+/// wikipedia.org/wiki/Modular_exponentiation#Right-to-left_binary_method
+pub fn powmod(comptime T: type, base: T, exponent: T, modulus: T) !T {
+    if (@typeInfo(T) != .Int) {
+        @compileError("powmod not implemented for " ++ @typeName(T));
+    }
+
     // zig fmt: off
-    if (modulus  == 0) return error.DivisionByZero;
+    if (modulus == 0) return error.DivisionByZero;
+    if (modulus  < 0) return error.NegativeModulus;
+    // TODO Perform by finding the modular multiplicative inverse
+    if (exponent < 0) return error.NegativeExponent;
+
     if (modulus  == 1) return 0;
-    if (exponent == 2) return mulmod(usize, base, base, modulus);
+    if (exponent == 2) return mulmod(T, base, base, modulus) catch unreachable;
     // zig fmt: on
 
-    var result: usize = 1;
+    var result: T = 1;
 
     // TODO Replace with `var b, var e, const m = .{ base, exponent, modulus };`
     var b = base;
@@ -76,9 +81,9 @@ pub fn powmod(base: usize, exponent: usize, modulus: usize) !usize {
     const m = modulus;
     while (e != 0) : (e >>= 1) {
         if (e & 1 == 1) {
-            result = mulmod(usize, result, b, m) catch unreachable;
+            result = mulmod(T, result, b, m) catch unreachable;
         }
-        b = mulmod(usize, b, b, m) catch unreachable;
+        b = mulmod(T, b, b, m) catch unreachable;
     }
 
     return result;
