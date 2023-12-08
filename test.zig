@@ -2,17 +2,14 @@ const std = @import("std");
 const debug = std.debug;
 const math = std.math;
 const mem = std.mem;
-const Tuple = std.meta.Tuple;
 
 const arith = @import("arith.zig");
 const invmod = arith.invmod;
 const mulmod = arith.mulmod;
 const powmod = arith.powmod;
 
-inline fn is_square(num: usize) bool {
-    const sqrt_num = math.sqrt(num);
-    return sqrt_num * sqrt_num == num;
-}
+// TODO Replace with `struct{ isize, usize, isize }`
+const LucasParams = std.meta.Tuple(&.{ isize, usize, isize });
 
 /// Trial division
 ///
@@ -44,7 +41,7 @@ pub fn miller_rabin(number: usize, base: usize) bool {
         return number == 2;
     }
 
-    // Expressing `number - 1` as `2ˢd`
+    // Expressing `number - 1` as 2ˢd
     var s = @ctz(number - 1);
     const d = math.shr(usize, number - 1, s);
 
@@ -60,6 +57,26 @@ pub fn miller_rabin(number: usize, base: usize) bool {
         if (x == number - 1) break true;
         // zig fmt: on
     } else false;
+}
+
+test "Strong base 2 pseudoprimes" {
+    // Strong pseudoprimes to base 2 (oeis.org/A001262)
+    const pseudoprimes = [_]usize{
+        2047,   3277,   4033,   4681,   8321,   15841,  29341,  42799,  49141,
+        52633,  65281,  74665,  80581,  85489,  88357,  90751,  104653, 130561,
+        196093, 220729, 233017, 252601, 253241, 256999, 271951, 280601, 314821,
+        357761, 390937, 458989, 476971, 486737,
+    };
+
+    var num: usize = 0;
+    while (num <= pseudoprimes[pseudoprimes.len - 1]) : (num += 1) {
+        // zig fmt: off
+        try std.testing.expect(
+            miller_rabin(num, 2) == trial_division(num) or
+            mem.indexOfScalar(usize, &pseudoprimes, num) != null
+        );
+        // zig fmt: on
+    }
 }
 
 /// Jacobi symbol
@@ -93,22 +110,120 @@ fn jacobi_symbol(upper: isize, lower: usize) !isize {
     return if (n == 1) result else 0;
 }
 
-test "Strong base 2 pseudoprimes" {
-    // Strong pseudoprimes to base 2 (oeis.org/A001262)
+/// Parameter selection for Lucas test
+///
+/// doi.org/10.1090/S0025-5718-1980-0572872-7
+fn selfridge_params(number: usize, star: bool) !?LucasParams {
+    if (number == 1) {
+        return null;
+    }
+
+    var d: isize = 5;
+    while (true) : (d = -(if (d < 0) d - 2 else d + 2)) {
+        switch (try jacobi_symbol(d, number)) {
+            -1 => break,
+            0 => {
+                // TODO Rewrite using `@abs`
+                const d_abs = @intCast(usize, if (d < 0) -d else d);
+                if (d_abs < number or d_abs % number != 0) return null;
+            },
+            1 => continue,
+            else => unreachable,
+        }
+    }
+
+    if (star) { // Method A*
+        if (d == 5) return .{ 5, 5, 5 };
+    }
+    return .{ d, 1, @divExact(1 - d, 4) };
+}
+
+/// Strong Lucas probable prime test
+///
+/// doi.org/10.48550/arXiv.2006.14425
+fn strong_lucas(number: usize, params: LucasParams) ?usize {
+    debug.assert(number % 2 == 1);
+
+    // Setting up parameters of the Lucas sequence
+    const d = if (params[0] > 0)
+        @intCast(usize, params[0])
+    else if (params[0] < 0)
+        invmod(params[0], number) catch
+            unreachable // Assumes use of the Jacobi symbol
+    else
+        unreachable;
+    const p = params[1];
+
+    // TODO Replace with `var u, var v = .{ @as(usize, 1), p };`
+    var u = @as(usize, 1);
+    var v = p;
+
+    const number_inc = math.add(usize, number, 1) catch return null;
+    // Represents 2ˢ when expressing `number + 1` as 2ˢd
+    const mask_cong = math.shl(usize, 1, @ctz(number_inc));
+    var mask = math.shl(usize, 1, blk: {
+        const bits = @typeInfo(usize).Int.bits - @clz(number_inc);
+        // First significative bit is located at `bits - 1`
+        // Skipped since since U and V are initialized
+        break :blk bits - 1 - 1;
+    });
+
+    var is_slprp = false;
+    while (mask != 0) : (mask >>= 1) {
+        const u_even = u * v;
+        const v_even = blk: {
+            // Rewritten by using the property: Vₙ² - DUₙ² = 4Qⁿ
+            const numerator = v * v + d * u * u;
+            break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
+        };
+        u = u_even % number;
+        v = v_even % number;
+
+        if (number_inc & mask != 0) {
+            const u_odd = blk: {
+                const numerator = p * u + v;
+                break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
+            };
+            const v_odd = blk: {
+                const numerator = d * u + p * v;
+                break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
+            };
+            u = u_odd % number;
+            v = v_odd % number;
+        }
+
+        // Checking for congruences
+        is_slprp = is_slprp or
+            (mask == mask_cong and u == 0) or
+            (mask <= mask_cong and v == 0);
+    }
+
+    if (!is_slprp) return null;
+    debug.assert(u == 0); // Should also be an lprp
+    return v;
+}
+
+test "Strong Lucas pseudoprimes" {
+    // Strong Lucas pseudoprimes defined by Method A (oeis.org/A217255)
     const pseudoprimes = [_]usize{
-        2047,   3277,   4033,   4681,   8321,   15841,  29341,  42799,  49141,
-        52633,  65281,  74665,  80581,  85489,  88357,  90751,  104653, 130561,
-        196093, 220729, 233017, 252601, 253241, 256999, 271951, 280601, 314821,
-        357761, 390937, 458989, 476971, 486737,
+        5459,   5777,   10877,  16109,  18971,  22499,  24569,  25199,  40309,  58519,
+        75077,  97439,  100127, 113573, 115639, 130139, 155819, 158399, 161027, 162133,
+        176399, 176471, 189419, 192509, 197801, 224369, 230691, 231703, 243629, 253259,
+        268349, 288919, 313499, 324899,
     };
 
-    var num: usize = 0;
-    while (num <= pseudoprimes[pseudoprimes.len - 1]) : (num += 1) {
-        // zig fmt: off
-        try std.testing.expect(
-            miller_rabin(num, 2) == trial_division(num) or
-            mem.indexOfScalar(usize, &pseudoprimes, num) != null
-        );
-        // zig fmt: on
+    var num: usize = 3;
+    while (num <= pseudoprimes[pseudoprimes.len - 1]) : (num += 2) {
+        if (try selfridge_params(num, false)) |params| {
+            // zig fmt: off
+            try std.testing.expect(
+                (strong_lucas(num, params) != null) == trial_division(num) or
+                mem.indexOfScalar(usize, &pseudoprimes, num) != null
+            );
+            // zig fmt: on
+        }
+    }
+}
+
     }
 }
