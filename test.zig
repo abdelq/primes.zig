@@ -37,9 +37,9 @@ pub fn trial_division(number: usize) bool {
 ///
 /// wikipedia.org/wiki/Miller–Rabin_primality_test
 pub fn miller_rabin(number: usize, base: usize) bool {
-    if (number <= 2) {
-        return number == 2;
-    }
+    debug.assert(number % 2 == 1);
+    if (number == 1) return false;
+    // TODO Checks for the base choice
 
     // Expressing `number - 1` as 2ˢd
     var s = @ctz(number - 1);
@@ -68,8 +68,8 @@ test "Strong base 2 pseudoprimes" {
         357761, 390937, 458989, 476971, 486737,
     };
 
-    var num: usize = 0;
-    while (num <= pseudoprimes[pseudoprimes.len - 1]) : (num += 1) {
+    var num: usize = 1;
+    while (num <= pseudoprimes[pseudoprimes.len - 1]) : (num += 2) {
         // zig fmt: off
         try std.testing.expect(
             miller_rabin(num, 2) == trial_division(num) or
@@ -212,7 +212,7 @@ test "Strong Lucas pseudoprimes" {
         268349, 288919, 313499, 324899,
     };
 
-    var num: usize = 3;
+    var num: usize = 1;
     while (num <= pseudoprimes[pseudoprimes.len - 1]) : (num += 2) {
         if (try selfridge_params(num, false)) |params| {
             // zig fmt: off
