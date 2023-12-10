@@ -170,26 +170,26 @@ fn strong_lucas(number: usize, params: LucasParams) ?usize {
 
     var is_slprp = false;
     while (mask != 0) : (mask >>= 1) {
-        const u_even = u * v;
+        const u_even = mulmod(usize, u, v, number) catch unreachable;
         const v_even = blk: {
             // Rewritten by using the property: Vₙ² - DUₙ² = 4Qⁿ
             const numerator = v * v + d * u * u;
             break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
-        };
-        u = u_even % number;
-        v = v_even % number;
+        } % number;
+        u = u_even;
+        v = v_even;
 
         if (number_inc & mask != 0) {
             const u_odd = blk: {
                 const numerator = p * u + v;
                 break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
-            };
+            } % number;
             const v_odd = blk: {
                 const numerator = d * u + p * v;
                 break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
-            };
-            u = u_odd % number;
-            v = v_odd % number;
+            } % number;
+            u = u_odd;
+            v = v_odd;
         }
 
         // Checking for congruences
@@ -225,5 +225,44 @@ test "Strong Lucas pseudoprimes" {
     }
 }
 
+/// Enhanced Baillie–PSW primality test
+///
+/// doi.org/10.48550/arXiv.2006.14425
+pub fn baillie_psw(number: usize) bool {
+    if (number % 2 == 0) {
+        return number == 2;
+    }
+
+    if (!miller_rabin(number, 2)) {
+        return false;
+    }
+
+    const params = selfridge_params(number, true) catch unreachable orelse return false;
+    const v = strong_lucas(number, params) orelse return false;
+
+    _ = v;
+
+    return true;
+}
+
+fn is_prime(number: usize) bool {
+    if (number < 10e5) {
+        return trial_division(number);
+    }
+    return baillie_psw(number);
+}
+
+pub fn main() void {
+    const test_limit = 10e7;
+
+    if (test_limit >= 2) {
+        std.debug.print("{d}\n", .{2});
+    }
+
+    var number: usize = 1;
+    while (number <= test_limit) : (number += 2) {
+        if (is_prime(number)) {
+            std.debug.print("{d}\n", .{number});
+        }
     }
 }

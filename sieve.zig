@@ -75,7 +75,7 @@ pub fn seg_sieve(comptime limit: usize, prime_out: *?usize) void {
 }
 
 pub fn main() void {
-    const sieve_limit = 10e6;
+    const sieve_limit = 10e7;
 
     var next_prime: ?usize = undefined;
     var sieve = async seg_sieve(sieve_limit, &next_prime);
