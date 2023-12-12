@@ -4,12 +4,22 @@ const math = std.math;
 const mem = std.mem;
 
 const arith = @import("arith.zig");
-const invmod = arith.invmod;
-const mulmod = arith.mulmod;
-const powmod = arith.powmod;
+inline fn invmod(number: isize, modulus: usize) usize {
+    return arith.invmod(number, modulus) catch unreachable;
+}
+inline fn mulmod(a: usize, b: usize, m: usize) usize {
+    return arith.mulmod(usize, a, b, m) catch unreachable;
+}
+inline fn powmod(base: usize, exponent: usize, modulus: usize) usize {
+    return arith.powmod(usize, base, exponent, modulus) catch unreachable;
+}
 
-// TODO Replace with `struct{ isize, usize, isize }`
-const LucasParams = std.meta.Tuple(&.{ isize, usize, isize });
+// TODO Replace with `struct{ usize, usize, isize }`
+const LucasParams = std.meta.Tuple(&.{ usize, usize, isize });
+
+inline fn div2mod(a: usize, m: usize) usize {
+    return (if (a % 2 == 0) a else a + m) / 2 % m;
+}
 
 /// Trial division
 ///
@@ -45,13 +55,13 @@ pub fn miller_rabin(number: usize, base: usize) bool {
     var s = @ctz(number - 1);
     const d = math.shr(usize, number - 1, s);
 
-    var x = powmod(usize, base, d, number) catch unreachable;
+    var x = powmod(base, d, number);
     if (x == 1 or x == number - 1) {
         return true;
     }
 
     return while (s > 1) : (s -= 1) {
-        x = powmod(usize, x, 2, number) catch unreachable;
+        x = powmod(x, 2, number);
         // zig fmt: off
         if (x == 1)          break false;
         if (x == number - 1) break true;
@@ -62,10 +72,10 @@ pub fn miller_rabin(number: usize, base: usize) bool {
 test "Strong base 2 pseudoprimes" {
     // Strong pseudoprimes to base 2 (oeis.org/A001262)
     const pseudoprimes = [_]usize{
-        2047,   3277,   4033,   4681,   8321,   15841,  29341,  42799,  49141,
-        52633,  65281,  74665,  80581,  85489,  88357,  90751,  104653, 130561,
-        196093, 220729, 233017, 252601, 253241, 256999, 271951, 280601, 314821,
-        357761, 390937, 458989, 476971, 486737,
+        2047,   3277,   4033,   4681,   8321,   15841,  29341,  42799,  49141,  52633,
+        65281,  74665,  80581,  85489,  88357,  90751,  104653, 130561, 196093, 220729,
+        233017, 252601, 253241, 256999, 271951, 280601, 314821, 357761, 390937, 458989,
+        476971, 486737,
     };
 
     var num: usize = 1;
@@ -135,7 +145,15 @@ fn selfridge_params(number: usize, star: bool) !?LucasParams {
     if (star) { // Method A*
         if (d == 5) return .{ 5, 5, 5 };
     }
-    return .{ d, 1, @divExact(1 - d, 4) };
+
+    // Keeping parameter as an unsigned integer
+    if (d > 0) {
+        return .{ @intCast(usize, d), 1, @divExact(1 - d, 4) };
+    } else if (d < 0) {
+        return .{ invmod(d, number), 1, @divExact(1 - d, 4) };
+    } else {
+        unreachable;
+    }
 }
 
 /// Strong Lucas probable prime test
@@ -144,14 +162,8 @@ fn selfridge_params(number: usize, star: bool) !?LucasParams {
 fn strong_lucas(number: usize, params: LucasParams) ?usize {
     debug.assert(number % 2 == 1);
 
-    // Setting up parameters of the Lucas sequence
-    const d = if (params[0] > 0)
-        @intCast(usize, params[0])
-    else if (params[0] < 0)
-        invmod(params[0], number) catch
-            unreachable // Assumes use of the Jacobi symbol
-    else
-        unreachable;
+    // TODO Replace with `const d, const p = ...`
+    const d = params[0];
     const p = params[1];
 
     // TODO Replace with `var u, var v = .{ @as(usize, 1), p };`
@@ -168,26 +180,18 @@ fn strong_lucas(number: usize, params: LucasParams) ?usize {
         break :blk bits - 1 - 1;
     });
 
+    // TODO Review calculations to avoid overflows
     var is_slprp = false;
     while (mask != 0) : (mask >>= 1) {
-        const u_even = mulmod(usize, u, v, number) catch unreachable;
-        const v_even = blk: {
-            // Rewritten by using the property: Vₙ² - DUₙ² = 4Qⁿ
-            const numerator = v * v + d * u * u;
-            break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
-        } % number;
+        const u_even = mulmod(u, v, number);
+        // Rewritten by using the property: Vₙ² - DUₙ² = 4Qⁿ
+        const v_even = div2mod(powmod(v, 2, number) + mulmod(d, powmod(u, 2, number), number), number);
         u = u_even;
         v = v_even;
 
         if (number_inc & mask != 0) {
-            const u_odd = blk: {
-                const numerator = p * u + v;
-                break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
-            } % number;
-            const v_odd = blk: {
-                const numerator = d * u + p * v;
-                break :blk if (numerator % 2 == 0) numerator / 2 else (numerator + number) / 2;
-            } % number;
+            const u_odd = div2mod(mulmod(p, u, number) + v, number);
+            const v_odd = div2mod(mulmod(d, u, number) + mulmod(p, v, number), number);
             u = u_odd;
             v = v_odd;
         }

@@ -20,6 +20,7 @@ pub fn invmod(number: isize, modulus: usize) !usize {
         const quotient = @intCast(isize, prev[1] / curr[1]);
         const remainder = prev[1] % curr[1];
 
+        // TODO Fix possible overflow in `next[0]`
         // `remainder` is equivalent to `prev[1] - quotient * curr[1]`
         const next: Tuple(&.{ isize, usize }) = .{ prev[0] - quotient * curr[0], remainder };
         prev = curr;
